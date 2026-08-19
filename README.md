@@ -90,7 +90,7 @@ folder on an interval, deduplicated by content hash, so you can diagnose a sync
 incident even after Obsidian rotates or truncates its log.
 
 ### 5. Pause sync for an interval — *TODO*
-Tracked in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md). Low priority (mainly helps
+On the backlog. Low priority (mainly helps
 first-time setup), and there's no public Obsidian API to toggle Sync, so it would
 likely be UI automation or a guided manual flow.
 
