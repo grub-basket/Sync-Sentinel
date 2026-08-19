@@ -1,7 +1,7 @@
 {
   "id": "sync-sentinel",
   "name": "Sync Sentinel",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "minAppVersion": "1.7.0",
   "description": "Force-sync huge files by splitting them into sync-friendly chunks, plus one-way encrypted backups, an on-disk safety mirror, and aggressive sync-log archiving.",
   "author": "Human",

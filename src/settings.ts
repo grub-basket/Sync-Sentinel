@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type SyncSentinelPlugin from "./main";
 import { humanBytes } from "./util/fsutil";
+import { FolderSuggest } from "./util/folderSuggest";
 
 const MB = 1024 * 1024;
 
@@ -15,6 +16,74 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
 
   private async save() {
     await this.plugin.saveSettings();
+  }
+
+  /**
+   * True if a destination path would land INSIDE the vault — i.e. it's relative,
+   * or it's absolute but under the vault's base path. Those need excluding from
+   * sync, or the backup/mirror syncs right back and defeats its own purpose.
+   * Pure string work (no Node `path`) so it can't trigger a module-load notice.
+   */
+  private isInsideVault(p: string): boolean {
+    const v = p.trim();
+    if (!v) return false;
+    const isAbsolute =
+      v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v) || v.startsWith("\\\\");
+    if (!isAbsolute) return true; // relative paths resolve inside the vault
+    const norm = v.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (norm === "") return true; // "/" — the folder picker's vault-root entry
+    const base = (this.plugin.base || "").replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!base) return false;
+    return norm === base || norm.startsWith(base + "/");
+  }
+
+  /**
+   * A destination path field: ghost text, vault-folder autocomplete, and a live
+   * "exclude this from sync" reminder when the chosen path is inside the vault.
+   */
+  private destinationField(
+    setting: Setting,
+    opts: {
+      placeholder: string;
+      get: () => string;
+      set: (v: string) => void;
+      what: string; // e.g. "backups"
+    }
+  ): void {
+    const warnEl = setting.descEl.createDiv();
+    warnEl.style.marginTop = "4px";
+    warnEl.style.color = "var(--text-warning, var(--text-error))";
+
+    const refreshWarning = (val: string) => {
+      if (!this.isInsideVault(val)) {
+        warnEl.setText("");
+        return;
+      }
+      warnEl.setText(
+        `⚠ That path is inside your vault, so your ${opts.what} would sync too — ` +
+          (this.s.syncthingMode
+            ? "add it to the plugin's managed .stignore (Syncthing mode is on: use “Update .stignore” after saving), "
+            : "exclude it in Obsidian Sync → Excluded folders, ") +
+          "or point it somewhere outside the vault."
+      );
+    };
+
+    setting.addText((t) => {
+      t.setPlaceholder(opts.placeholder).setValue(opts.get());
+      t.inputEl.style.width = "20em";
+      new FolderSuggest(this.app, t.inputEl, async (picked) => {
+        opts.set(picked);
+        await this.save();
+        refreshWarning(picked);
+      });
+      t.onChange(async (v) => {
+        opts.set(v.trim());
+        await this.save();
+        refreshWarning(v);
+      });
+    });
+
+    refreshWarning(opts.get());
   }
 
   display(): void {
@@ -85,12 +154,17 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
     new Setting(c)
       .setName("Shard folder")
       .setDesc("Vault-relative folder where shards and manifests live.")
-      .addText((t) =>
-        t.setValue(this.s.shardFolder).onChange(async (v) => {
+      .addText((t) => {
+        t.setValue(this.s.shardFolder);
+        new FolderSuggest(this.app, t.inputEl, async (p) => {
+          this.s.shardFolder = p === "/" ? ".sync-sentinel/shards" : p;
+          await this.save();
+        });
+        t.onChange(async (v) => {
           this.s.shardFolder = v.trim() || ".sync-sentinel/shards";
           await this.save();
-        })
-      );
+        });
+      });
 
     new Setting(c)
       .setName("Shard extension")
@@ -191,18 +265,19 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
       })
     );
 
-    new Setting(c)
-      .setName("Backup destination")
-      .setDesc("Absolute path OUTSIDE the vault.")
-      .addText((t) =>
-        t
-          .setPlaceholder("/Users/you/Backups/MyVault")
-          .setValue(this.s.backupDestination)
-          .onChange(async (v) => {
-            this.s.backupDestination = v.trim();
-            await this.save();
-          })
-      );
+    this.destinationField(
+      new Setting(c)
+        .setName("Backup destination")
+        .setDesc("Absolute path OUTSIDE the vault. Start typing to pick a vault folder."),
+      {
+        placeholder: "/Users/you/Backups/MyVault",
+        get: () => this.s.backupDestination,
+        set: (v) => {
+          this.s.backupDestination = v;
+        },
+        what: "backups",
+      }
+    );
 
     new Setting(c)
       .setName("Backup interval (minutes)")
@@ -308,15 +383,19 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
       })
     );
 
-    new Setting(c)
-      .setName("Mirror destination")
-      .setDesc("Absolute path OUTSIDE the vault.")
-      .addText((t) =>
-        t.setValue(this.s.mirrorDestination).onChange(async (v) => {
-          this.s.mirrorDestination = v.trim();
-          await this.save();
-        })
-      );
+    this.destinationField(
+      new Setting(c)
+        .setName("Mirror destination")
+        .setDesc("Absolute path OUTSIDE the vault. Start typing to pick a vault folder."),
+      {
+        placeholder: "/Users/you/Backups/MyVault-mirror",
+        get: () => this.s.mirrorDestination,
+        set: (v) => {
+          this.s.mirrorDestination = v;
+        },
+        what: "mirrored copies",
+      }
+    );
 
     new Setting(c)
       .setName("Recent window (minutes)")
@@ -381,15 +460,19 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(c)
-      .setName("Archive destination")
-      .setDesc("Absolute path for archived sync logs.")
-      .addText((t) =>
-        t.setValue(this.s.syncLogDestination).onChange(async (v) => {
-          this.s.syncLogDestination = v.trim();
-          await this.save();
-        })
-      );
+    this.destinationField(
+      new Setting(c)
+        .setName("Archive destination")
+        .setDesc("Absolute path for archived sync logs. Start typing to pick a vault folder."),
+      {
+        placeholder: "/Users/you/Backups/MyVault-synclogs",
+        get: () => this.s.syncLogDestination,
+        set: (v) => {
+          this.s.syncLogDestination = v;
+        },
+        what: "archived logs",
+      }
+    );
 
     new Setting(c)
       .setName("Snapshot interval (minutes)")
@@ -431,12 +514,17 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
           "You MUST add this folder to Obsidian Sync's excluded list once, or purging " +
           "synced shards would delete these archives too."
       )
-      .addText((t) =>
-        t.setValue(this.s.archiveFolder).onChange(async (v) => {
+      .addText((t) => {
+        t.setPlaceholder(".sync-sentinel-archive").setValue(this.s.archiveFolder);
+        new FolderSuggest(this.app, t.inputEl, async (p) => {
+          this.s.archiveFolder = p === "/" ? ".sync-sentinel-archive" : p;
+          await this.save();
+        });
+        t.onChange(async (v) => {
           this.s.archiveFolder = v.trim() || ".sync-sentinel-archive";
           await this.save();
-        })
-      );
+        });
+      });
 
     new Setting(c)
       .setName("Syncthing / P2P mode")
