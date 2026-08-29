@@ -65,6 +65,55 @@ export interface SyncSentinelSettings {
   /** Vault-relative folder the user should EXCLUDE from sync; we note it here. */
   mirrorExcludeNote: string;
 
+  // --- Local version history & file recovery ---
+  /**
+   * Keep a local, deduplicated version history of text files (snapshots into
+   * `<archiveFolder>/_bases/`, sync-excluded). Powers the version-history
+   * browser, the blank-file guard, and — when offline merge is on — the merge
+   * ancestor. Independent of any sync tool: this is what recovers a note that a
+   * flaky network drive truncated to empty while it was open. Off by default;
+   * enabling offline merge turns it on implicitly.
+   */
+  versionHistoryEnabled: boolean;
+  /**
+   * Watch for a note's body being suddenly blanked (a known network/cloud-drive
+   * failure that empties open files under Obsidian). A detected blanking is
+   * recorded as "suspicious" (never a merge base, never the restore target),
+   * you're alerted, and the pre-blank version stays one click away.
+   */
+  blankGuardEnabled: boolean;
+
+  // --- Offline merge (multi-device edit safety on Syncthing) ---
+  /**
+   * Detect `*.sync-conflict-*` / "conflicted copy" siblings and three-way merge
+   * them via the version-history ancestor. Off by default. Implies
+   * `versionHistoryEnabled` (snapshots must exist for a merge to have a base).
+   */
+  offlineMergeEnabled: boolean;
+  /**
+   * Auto-apply a merge when the two variants touched DIFFERENT regions (a
+   * clean diff3). Overlapping edits are always flagged for review regardless.
+   */
+  offlineMergeAuto: boolean;
+
+  // --- Retention (age-based purge of local safety copies) ---
+  /** Newest versions kept per mirrored file (count-based, always on). */
+  mirrorKeepVersions: number;
+  /**
+   * Age-based purge of LOCAL safety copies (mirror versions, ancestor
+   * snapshots, resolved-conflict copies). OFF by default — nothing is ever
+   * deleted by age until the user turns this on and chooses the age + cadence.
+   * Keeper shard archives are NEVER age-purged (they answer to the keeper
+   * protocol, not retention).
+   */
+  retentionPurgeEnabled: boolean;
+  /** Delete safety copies older than this many days. */
+  retentionPurgeAgeDays: number;
+  /** How often (days) the purge pass runs. */
+  retentionPurgeIntervalDays: number;
+  /** Last completed purge pass (ms). Managed by the plugin. */
+  lastRetentionPurgeAt: number;
+
   // --- Sync-log archiving ---
   syncLogEnabled: boolean;
   /** Absolute path to Obsidian's sync log (auto-detected if blank). */
@@ -104,6 +153,17 @@ export const DEFAULT_SETTINGS: SyncSentinelSettings = {
   mirrorRecentMinutes: 60,
   mirrorIntervalMinutes: 15,
   mirrorExcludeNote: ".sync-sentinel-mirror",
+
+  versionHistoryEnabled: false,
+  blankGuardEnabled: true,
+  offlineMergeEnabled: false,
+  offlineMergeAuto: true,
+
+  mirrorKeepVersions: 10,
+  retentionPurgeEnabled: false,
+  retentionPurgeAgeDays: 60,
+  retentionPurgeIntervalDays: 7,
+  lastRetentionPurgeAt: 0,
 
   syncLogEnabled: false,
   syncLogPath: "",

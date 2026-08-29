@@ -60,6 +60,72 @@ Sync Sentinel tracks who has what and lets you reclaim that space safely:
 > in **Obsidian Sync → Selective sync → file types** (or change the extension in
 > settings to one you already sync), otherwise the shards themselves won't sync.
 
+### Recovering blanked notes (network-drive glitch)
+Some network and cloud drives have a nasty failure mode: while Obsidian is
+running, an open note's body gets suddenly **blanked** — wiped to empty on disk
+under the editor. (A long-standing headache on shared/corporate drives.) It's
+not a sync conflict and no conflict file is written, so nothing catches it — you
+just notice, maybe much later, that notes are empty.
+
+With **version history** on (see below), Sync Sentinel guards against exactly
+this:
+
+- It remembers each note's content **when you open it** and as you edit, into
+  the sync-excluded archive folder — so the pre-blank version exists even for a
+  note you only read.
+- When a save wipes a note's body, it's recorded as **suspicious** (never used
+  as good history or a merge base), the status bar and a notice flag it, and the
+  registry lists it under *Blanked notes — recoverable*.
+- Restore is **editor-aware and non-destructive**: *Restore active note to last
+  healthy version*, *Rescue blanked notes now (open tabs)*, or review the full
+  timeline via right-click → *version history*. Because the blanked buffer is
+  still loaded, restoring writes into the **editor** (and flushes to disk), so
+  Obsidian can't re-save the blank over your recovered text. The blanked version
+  stays in history too, so nothing is lost either way.
+
+This works on a **single device with no sync at all** — it's about the drive,
+not about syncing.
+
+### Offline edit merging & local version history
+If you habitually edit on multiple offline devices, sync reconciliation is where
+edits get hurt: file-sync tools either keep one version and drop the other next
+to it as a conflict copy (Syncthing `.sync-conflict-…`, Dropbox/Nextcloud
+"conflicted copy"), or silently pick a winner / auto-merge (Obsidian Sync). With
+**offline edit merging** on, Sync Sentinel:
+
+- remembers every version of your text files as they change (immediately, on
+  each save — deduplicated by content, compacted over time, stored in the
+  sync-excluded archive folder so each device keeps the ancestors *it* saw),
+- three-way merges conflict copies against the common ancestor, whatever tool
+  wrote them: edits to **different parts** of a note combine automatically;
+  edits to the **same lines** are flagged in the registry for one-click
+  resolution (merge with markers / keep this device's / take the synced copy) —
+  never guessed, and
+- gives every file a **local version history**: right-click → *Sync Sentinel:
+  version history* (or the command) to preview and restore any remembered
+  version. That is what removes the deadline — a silent last-writer-wins
+  overwrite or a bad automatic merge is fixable **whenever** you notice, not
+  only while your sync service's server-side history lasts. Restores are
+  non-destructive: the replaced content becomes a version too.
+
+Both originals are always preserved before any merge (a copy of every resolved
+conflict is kept), and the conflict file goes to Obsidian's trash, not deletion.
+Off by default. Auto-apply of clean merges can be disabled separately.
+
+### Archive validation
+*Validate keeper archives against synced shards* hash-checks every tracked file
+both ways: are the synced shards complete and uncorrupted, and does this
+device's cold archive still match what the manifest promised? Orphaned archive
+sets (no matching manifest) are surfaced too. Results show in the registry.
+
+### Retention
+Local safety copies (mirror versions, merge ancestors, resolved-conflict
+copies) accumulate forever by default — **nothing is deleted by age until you
+opt in**, choosing the age threshold and cadence. Each file's newest copy
+always survives, and keeper shard archives are never age-purged (they answer to
+the keeper/purge-gate protocol instead). A dry-run preview command shows what a
+purge would remove before you enable anything.
+
 ### 2. One-way encrypted backups
 Timestamped, generational snapshots of the whole vault to a folder outside it.
 Optional **AES-256-GCM** encryption. The key is stored, in preference order, in:
@@ -102,6 +168,12 @@ likely be UI automation or a guided manual flow.
 - Run one-way backup now
 - Run disk safety mirror now
 - Snapshot sync log now
+- Scan for sync conflicts and merge offline edits
+- Recover active note: browse & restore version history
+- Restore active note to last healthy version
+- Rescue blanked notes now (open tabs)
+- Validate keeper archives against synced shards
+- Preview retention purge (dry run) / Run retention purge now
 
 ## Development
 ```bash

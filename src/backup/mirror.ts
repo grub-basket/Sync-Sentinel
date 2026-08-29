@@ -7,7 +7,6 @@ import { copyAtomic, ensureDir, exists, statSafe } from "../util/fsutil";
 import { log, warn } from "../util/log";
 import type { SyncSentinelSettings } from "../types";
 
-const KEEP_VERSIONS = 10;
 
 function stamp(ms: number): string {
   const d = new Date(ms);
@@ -79,8 +78,9 @@ export class DiskMirror {
     } catch {
       return;
     }
+    const keep = Math.max(1, this.s.mirrorKeepVersions || 10);
     const versions = entries.filter((e) => e.includes("__")).sort();
-    const excess = versions.slice(0, Math.max(0, versions.length - KEEP_VERSIONS));
+    const excess = versions.slice(0, Math.max(0, versions.length - keep));
     for (const v of excess) {
       try {
         await fsp.unlink(path.join(verDir, v));
@@ -88,6 +88,52 @@ export class DiskMirror {
         /* ignore */
       }
     }
+  }
+
+  /**
+   * Age-based purge of mirror version files — called ONLY by the opt-in
+   * retention purge, never on the mirror's own schedule. Always keeps each
+   * file's newest version regardless of age (the mirror must stay useful as a
+   * "last known good" even for files untouched in months). Returns the count
+   * of removed (or, in dryRun, removable) version files.
+   */
+  async pruneOlderThan(ageMs: number, dryRun: boolean): Promise<number> {
+    const s = this.s;
+    if (!s.mirrorDestination) return 0;
+    const cutoff = Date.now() - ageMs;
+    let removed = 0;
+    const visit = async (dir: string): Promise<void> => {
+      let entries: import("fs").Dirent[];
+      try {
+        entries = await fsp.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      const versions = entries
+        .filter((e) => e.isFile() && e.name.includes("__"))
+        .map((e) => e.name)
+        .sort();
+      // Newest (last by stamp-sorted name) survives unconditionally.
+      for (const v of versions.slice(0, -1)) {
+        const abs = path.join(dir, v);
+        const st = await statSafe(abs);
+        if (st && st.mtimeMs < cutoff) {
+          removed++;
+          if (!dryRun) {
+            try {
+              await fsp.unlink(abs);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
+      for (const e of entries) {
+        if (e.isDirectory()) await visit(path.join(dir, e.name));
+      }
+    };
+    await visit(s.mirrorDestination);
+    return removed;
   }
 
   resetSeen(): void {

@@ -33,6 +33,22 @@ function vExtname(p: string): string {
   return i <= 0 ? "" : base.slice(i);
 }
 
+export interface ArchiveValidationRow {
+  id: string;
+  originalPath: string;
+  synced: { present: number; total: number; badHash: number };
+  /** null = this device holds no archive of the set (not necessarily a problem). */
+  archived: { present: number; total: number; badHash: number } | null;
+  ok: boolean;
+}
+
+export interface ArchiveValidationReport {
+  rows: ArchiveValidationRow[];
+  /** Archive subfolders with no matching manifest. */
+  orphanedArchiveSets: string[];
+  checkedAt: number;
+}
+
 export interface RegistryEntryStatus {
   manifest: SplitManifest;
   originalPresent: boolean;
@@ -681,6 +697,76 @@ export class SplitRegistry {
       });
       if (retractArchive.length) warn("retracted stale archive acks:", retractArchive);
     }
+  }
+
+  /**
+   * Validation checker: diff the LOCAL excluded archive against what actually
+   * syncs (shard folder + manifests), hash-verified both ways. Answers "if I
+   * purged the synced shards today, would my cold copies really cover me?" —
+   * and the reverse, "does what's syncing still match what the manifest
+   * promised?". Also surfaces orphaned archive sets (archives whose manifest
+   * is gone — e.g. after a Forget) so nothing rots invisibly. (heavy: hashes
+   * every shard it finds; run via the explicit command, not on a timer.)
+   */
+  async validateArchives(): Promise<ArchiveValidationReport> {
+    const manifests = await this.listManifests();
+    const rows: ArchiveValidationRow[] = [];
+    for (const m of manifests) {
+      const syncedDir = this.shardSetDirVault(m.id);
+      const archDir = this.archiveSetDirVault(m.id);
+      const synced = { present: 0, total: m.shards.length, badHash: 0 };
+      const hasArchiveDir = await this.adapter.exists(archDir);
+      const archived = hasArchiveDir
+        ? { present: 0, total: m.shards.length, badHash: 0 }
+        : null;
+      for (const sh of m.shards) {
+        const sp = vJoin(syncedDir, sh.name);
+        if (await this.adapter.exists(sp)) {
+          synced.present++;
+          const h = await hashFile(this.absFromVault(sp)).catch(() => "");
+          if (h !== sh.sha256) synced.badHash++;
+        }
+        if (archived) {
+          const ap = vJoin(archDir, sh.name);
+          if (await this.adapter.exists(ap)) {
+            archived.present++;
+            const h = await hashFile(this.absFromVault(ap)).catch(() => "");
+            if (h !== sh.sha256) archived.badHash++;
+          }
+        }
+      }
+      const syncedComplete = synced.present === synced.total && synced.badHash === 0;
+      const archiveComplete =
+        !!archived && archived.present === archived.total && archived.badHash === 0;
+      rows.push({
+        id: m.id,
+        originalPath: m.originalPath,
+        synced,
+        archived,
+        // Healthy = at least one complete, uncorrupted copy exists somewhere,
+        // and nothing found is corrupt.
+        ok:
+          (syncedComplete || archiveComplete) &&
+          synced.badHash === 0 &&
+          (archived?.badHash ?? 0) === 0,
+      });
+    }
+    // Orphaned archive sets: archive subfolders with no matching manifest.
+    const orphanedArchiveSets: string[] = [];
+    const known = new Set(manifests.map((m) => m.id));
+    try {
+      if (await this.adapter.exists(this.s.archiveFolder)) {
+        const listed = await this.adapter.list(this.s.archiveFolder);
+        for (const d of listed.folders) {
+          const name = vBasename(d);
+          if (name === "_bases") continue; // the merge base store, not an archive set
+          if (!known.has(name)) orphanedArchiveSets.push(name);
+        }
+      }
+    } catch {
+      /* archive folder unreadable — nothing to report */
+    }
+    return { rows, orphanedArchiveSets, checkedAt: Date.now() };
   }
 
   /** Is a valid (current) archive of this split present locally? */

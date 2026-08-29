@@ -43,6 +43,9 @@ export class RegistryModal extends Modal {
     };
 
     this.renderOverview(contentEl);
+    this.renderBlanked(contentEl);
+    this.renderEditConflicts(contentEl);
+    this.renderValidation(contentEl);
 
     const tracked = contentEl.createEl("h3", { text: "Tracked splits" });
     tracked.style.margin = "16px 0 4px";
@@ -370,6 +373,128 @@ export class RegistryModal extends Modal {
         tag.setText("~ close");
         tag.style.color = "var(--text-warning, var(--text-muted))";
       }
+    }
+  }
+
+  /** Notes detected as blanked (network-drive glitch) that can be rescued. */
+  private renderBlanked(root: HTMLElement): void {
+    const blanked = [...this.plugin.recovery.blanked.values()];
+    if (blanked.length === 0) return;
+    const wrap = root.createDiv();
+    const h = wrap.createEl("h3", { text: `⚠ Blanked notes — recoverable (${blanked.length})` });
+    h.style.margin = "12px 0 4px";
+    h.style.color = "var(--text-error)";
+    wrap.createDiv({
+      text: "These open notes were wiped to empty (a network/cloud-drive glitch). Their last good version is remembered locally.",
+      cls: "setting-item-description",
+    });
+    const rescueAll = wrap.createEl("button", { text: "Rescue all now" });
+    rescueAll.style.margin = "6px 0";
+    rescueAll.onclick = async () => {
+      await this.plugin.recovery.rescueOpenTabs();
+      this.render();
+    };
+    for (const b of blanked) {
+      const row = wrap.createDiv();
+      row.style.padding = "4px 0";
+      row.style.borderTop = "1px solid var(--background-modifier-border)";
+      row.createDiv({ text: b.path }).style.fontWeight = "600";
+      const btns = row.createDiv();
+      const mk = (label: string, fn: () => Promise<unknown>) => {
+        const btn = btns.createEl("button", { text: label });
+        btn.style.marginRight = "6px";
+        btn.onclick = async () => {
+          await fn();
+          this.render();
+        };
+      };
+      mk("Restore last good", () => this.plugin.recovery.restoreLatestHealthy(b.path));
+      mk("Review history", async () => this.plugin.openHistory(b.path));
+    }
+  }
+
+  /** Flagged sync-conflict pairs the weaver could not (or may not) auto-merge. */
+  private renderEditConflicts(root: HTMLElement): void {
+    const flagged = [...this.plugin.weaver.flagged.values()];
+    if (flagged.length === 0) return;
+    const wrap = root.createDiv();
+    const h = wrap.createEl("h3", { text: `Edit conflicts needing review (${flagged.length})` });
+    h.style.margin = "12px 0 4px";
+    const REASON: Record<string, string> = {
+      "no-base": "no common ancestor known — can't 3-way merge",
+      overlap: "both devices edited the same lines",
+      binary: "not a mergeable text file",
+      "missing-original": "conflict copy has no original beside it",
+    };
+    for (const f of flagged) {
+      const row = wrap.createDiv();
+      row.style.padding = "6px 0";
+      row.style.borderTop = "1px solid var(--background-modifier-border)";
+      row.createDiv({ text: f.originalPath }).style.fontWeight = "600";
+      const why = row.createDiv({
+        text:
+          REASON[f.reason] +
+          (f.conflicts ? ` (${f.conflicts} overlapping region${f.conflicts === 1 ? "" : "s"})` : ""),
+      });
+      why.style.fontSize = "12px";
+      why.style.color = "var(--text-muted)";
+      const btns = row.createDiv();
+      btns.style.marginTop = "4px";
+      const mk = (label: string, fn: () => Promise<unknown>) => {
+        const b = btns.createEl("button", { text: label });
+        b.style.marginRight = "6px";
+        b.onclick = async () => {
+          await fn();
+          this.render();
+        };
+      };
+      if (f.reason === "overlap" || f.reason === "no-base") {
+        mk("Merge with markers", () => this.plugin.weaver.applyWithMarkers(f));
+      }
+      mk("Keep this device's", () => this.plugin.weaver.keepLocal(f));
+      mk("Take synced copy", () => this.plugin.weaver.takeConflict(f));
+      mk("Open both", async () => {
+        await this.app.workspace.openLinkText(f.originalPath, "", true);
+        await this.app.workspace.openLinkText(f.conflictPath, "", true);
+      });
+    }
+  }
+
+  /** Result of the last "Validate keeper archives" run, if any. */
+  private renderValidation(root: HTMLElement): void {
+    const rep = this.plugin.lastValidation;
+    if (!rep) return;
+    const wrap = root.createDiv();
+    const h = wrap.createEl("h3", { text: "Archive validation" });
+    h.style.margin = "12px 0 4px";
+    const when = wrap.createDiv({
+      text: `Checked ${new Date(rep.checkedAt).toLocaleString()} — archive vs synced shards, hash-verified.`,
+    });
+    when.style.fontSize = "12px";
+    when.style.color = "var(--text-muted)";
+    when.style.marginBottom = "6px";
+    if (rep.rows.length === 0 && rep.orphanedArchiveSets.length === 0) {
+      wrap.createDiv({ text: "Nothing tracked to validate.", cls: "setting-item-description" });
+      return;
+    }
+    for (const r of rep.rows) {
+      const row = wrap.createDiv();
+      row.style.fontSize = "13px";
+      row.style.padding = "2px 0";
+      const cell = (x: { present: number; total: number; badHash: number }) =>
+        `${x.present}/${x.total}${x.badHash ? ` (${x.badHash} corrupt!)` : ""}`;
+      row.setText(
+        `${r.ok ? "✓" : "✗"} ${r.originalPath} — synced ${cell(r.synced)}, ` +
+          (r.archived ? `archived ${cell(r.archived)}` : "no local archive")
+      );
+      row.style.color = r.ok ? "var(--text-muted)" : "var(--text-error)";
+    }
+    for (const o of rep.orphanedArchiveSets) {
+      const row = wrap.createDiv({
+        text: `⚠ orphaned archive set "${o}" — no matching manifest (safe to review & remove by hand)`,
+      });
+      row.style.fontSize = "13px";
+      row.style.color = "var(--text-warning)";
     }
   }
 

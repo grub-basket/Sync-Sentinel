@@ -91,8 +91,11 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     this.splitterSection(containerEl);
+    this.versionHistorySection(containerEl);
+    this.offlineMergeSection(containerEl);
     this.backupSection(containerEl);
     this.mirrorSection(containerEl);
+    this.retentionSection(containerEl);
     this.syncLogSection(containerEl);
     this.miscSection(containerEl);
   }
@@ -368,6 +371,171 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
   }
 
   // --- disk mirror ---
+  // --- version history & file recovery ---
+  private versionHistorySection(c: HTMLElement): void {
+    c.createEl("h2", { text: "Version history & file recovery" });
+    c.createEl("p", {
+      text:
+        "Keeps a local, deduplicated version history of your text files in the sync-excluded archive folder. This is the recovery cache for a nasty failure some network/cloud drives cause: while Obsidian is running, an open note's body gets suddenly blanked. With this on, Sync Sentinel remembers each note's content as you open and edit it, watches for a sudden blanking, alerts you, and lets you restore the last good version — right-click a file → 'Sync Sentinel: version history', or the recovery commands. Works on a single device with no sync at all. (Enabling offline edit merging below turns this on automatically.)",
+      cls: "setting-item-description",
+    });
+
+    new Setting(c)
+      .setName("Keep local version history")
+      .setDesc(
+        "Snapshot text files on open and on change (deduplicated). Powers the history browser and file recovery."
+      )
+      .addToggle((t) =>
+        t.setValue(this.s.versionHistoryEnabled).onChange(async (v) => {
+          this.s.versionHistoryEnabled = v;
+          await this.save();
+          if (v) {
+            const n = await this.plugin.seedMergeBases().catch(() => 0);
+            await this.plugin.recovery.captureOpenTabs().catch(() => {});
+            if (n > 0) new Notice(`Sync Sentinel: remembered ${n} file(s) for recovery.`);
+          }
+        })
+      );
+
+    new Setting(c)
+      .setName("Watch for sudden blanking")
+      .setDesc(
+        "Detect when a note's body is wiped out (a network-drive glitch), record it as suspicious rather than good history, and alert you so you can restore. Recommended on."
+      )
+      .addToggle((t) =>
+        t.setValue(this.s.blankGuardEnabled).onChange(async (v) => {
+          this.s.blankGuardEnabled = v;
+          await this.save();
+        })
+      );
+
+    new Setting(c)
+      .addButton((b) =>
+        b
+          .setButtonText("Rescue blanked open notes now")
+          .onClick(async () => {
+            const { restored, skipped } = await this.plugin.recovery.rescueOpenTabs();
+            new Notice(
+              restored.length || skipped.length
+                ? `Restored ${restored.length}${skipped.length ? `, ${skipped.length} without a healthy version` : ""}.`
+                : "No open notes are currently blank."
+            );
+          })
+      )
+      .addButton((b) =>
+        b.setButtonText("Version history of active note").onClick(() => {
+          const f = this.plugin.app.workspace.getActiveFile();
+          if (f) this.plugin.openHistory(f.path);
+          else new Notice("No active file.");
+        })
+      );
+  }
+
+  // --- offline merge (multi-device edit safety) ---
+  private offlineMergeSection(c: HTMLElement): void {
+    c.createEl("h2", { text: "Offline edit merging" });
+    c.createEl("p", {
+      text:
+        "Protects the habit of editing on multiple offline devices, whatever does the syncing. Sync Sentinel remembers versions of your text files locally (in the sync-excluded archive folder) as they change. When your sync tool drops a conflict copy next to a file (Syncthing '.sync-conflict-…', Dropbox/Nextcloud 'conflicted copy'), the two versions are three-way merged against their common ancestor: edits to different parts of a note combine automatically; edits to the same lines are flagged for review in the registry, never guessed. And because every version is remembered, a bad automatic merge or a silent last-writer-wins overwrite (e.g. by Obsidian Sync) is fixable whenever you notice — right-click any file → 'Sync Sentinel: version history' to preview and restore. There is no deadline: versions are kept until you enable the retention purge below.",
+      cls: "setting-item-description",
+    });
+
+    new Setting(c)
+      .setName("Enable offline edit merging")
+      .setDesc(
+        "Passively snapshots text files as they change (deduplicated by content) so a merge always has a common ancestor."
+      )
+      .addToggle((t) =>
+        t.setValue(this.s.offlineMergeEnabled).onChange(async (v) => {
+          this.s.offlineMergeEnabled = v;
+          await this.save();
+          if (v) {
+            // Seed ancestors for uncovered files so the FIRST conflict after
+            // enabling is already mergeable.
+            const n = await this.plugin.seedMergeBases().catch(() => 0);
+            if (n > 0) new Notice(`Sync Sentinel: remembered ${n} file(s) as merge ancestors.`);
+          }
+        })
+      );
+
+    new Setting(c)
+      .setName("Auto-apply clean merges")
+      .setDesc(
+        "When the two versions changed different parts of the file, apply the merge automatically. Overlapping edits are always flagged for review regardless. Both originals are preserved before any merge."
+      )
+      .addToggle((t) =>
+        t.setValue(this.s.offlineMergeAuto).onChange(async (v) => {
+          this.s.offlineMergeAuto = v;
+          await this.save();
+        })
+      );
+
+    new Setting(c).addButton((b) =>
+      b.setButtonText("Scan for conflicts now").onClick(() => this.plugin.weaver.scan())
+    );
+  }
+
+  // --- retention (age-based purge of safety copies) ---
+  private retentionSection(c: HTMLElement): void {
+    c.createEl("h2", { text: "Retention" });
+    c.createEl("p", {
+      text:
+        "Local safety copies (mirror versions, merge-base snapshots, resolved-conflict copies) accumulate forever by default — nothing is ever deleted by age until you turn this on. Keeper shard archives are NEVER age-purged; they answer to the keeper/purge-gate protocol instead.",
+      cls: "setting-item-description",
+    });
+
+    new Setting(c)
+      .setName("Enable scheduled retention purge")
+      .setDesc("Deletes safety copies older than the age below, on the cadence below.")
+      .addToggle((t) =>
+        t.setValue(this.s.retentionPurgeEnabled).onChange(async (v) => {
+          this.s.retentionPurgeEnabled = v;
+          await this.save();
+        })
+      );
+
+    new Setting(c)
+      .setName("Purge copies older than (days)")
+      .setDesc("Each file's newest copy always survives, regardless of age.")
+      .addText((t) =>
+        t.setValue(String(this.s.retentionPurgeAgeDays)).onChange(async (v) => {
+          const n = parseInt(v, 10);
+          if (!isNaN(n) && n > 0) {
+            this.s.retentionPurgeAgeDays = n;
+            await this.save();
+          }
+        })
+      );
+
+    new Setting(c)
+      .setName("Run every (days)")
+      .addText((t) =>
+        t.setValue(String(this.s.retentionPurgeIntervalDays)).onChange(async (v) => {
+          const n = parseInt(v, 10);
+          if (!isNaN(n) && n > 0) {
+            this.s.retentionPurgeIntervalDays = n;
+            await this.save();
+          }
+        })
+      );
+
+    new Setting(c)
+      .addButton((b) =>
+        b
+          .setButtonText("Preview purge (dry run)")
+          .onClick(() => this.plugin.runRetentionPurge({ dryRun: true }))
+      )
+      .addButton((b) =>
+        b.setButtonText("Purge now").onClick(async () => {
+          if (!this.s.retentionPurgeEnabled) {
+            new Notice("Enable the retention purge first — this deletes old safety copies.");
+            return;
+          }
+          await this.plugin.runRetentionPurge({ dryRun: false });
+        })
+      );
+  }
+
   private mirrorSection(c: HTMLElement): void {
     c.createEl("h2", { text: "On-disk safety mirror" });
     c.createEl("p", {
@@ -417,6 +585,21 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
           const n = parseInt(v, 10);
           if (!isNaN(n) && n > 0) {
             this.s.mirrorIntervalMinutes = n;
+            await this.save();
+          }
+        })
+      );
+
+    new Setting(c)
+      .setName("Versions kept per file")
+      .setDesc(
+        "Newest mirror copies kept for each file (count-based). Age-based cleanup is separate — see Retention below, off by default."
+      )
+      .addText((t) =>
+        t.setValue(String(this.s.mirrorKeepVersions)).onChange(async (v) => {
+          const n = parseInt(v, 10);
+          if (!isNaN(n) && n > 0) {
+            this.s.mirrorKeepVersions = n;
             await this.save();
           }
         })
