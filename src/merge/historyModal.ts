@@ -8,6 +8,7 @@
 // restore any of them, whenever you get around to noticing.
 import { App, Modal, Notice } from "obsidian";
 import type { BaseStore } from "./baseStore";
+import { applyWideModal } from "../util/modalStyle";
 
 /** Cheap line-diff summary: how many lines this version adds/removes vs now. */
 function diffSummary(from: string, to: string): string {
@@ -46,6 +47,7 @@ export class HistoryModal extends Modal {
   }
 
   async onOpen(): Promise<void> {
+    applyWideModal(this.modalEl);
     this.titleEl.setText(`Version history — ${this.filePath}`);
     await this.render();
   }
@@ -76,6 +78,8 @@ export class HistoryModal extends Modal {
       head.style.display = "flex";
       head.style.justifyContent = "space-between";
       head.style.alignItems = "baseline";
+      head.style.flexWrap = "wrap";
+      head.style.gap = "2px 10px";
       const title = head.createSpan({ text: new Date(s.t).toLocaleString() });
       title.style.fontWeight = "600";
       if (s.suspicious) {

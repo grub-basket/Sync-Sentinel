@@ -17,6 +17,10 @@ a small server yourself.
   and "transmission-only" answer.
 - **Your vault is basically text and you like git** → **Obsidian Git**. Free via
   GitHub, but poor for large or binary files.
+- **You're on a locked-down work computer with no admin rights** (can't install
+  Syncthing or run a server) → **Supabase Storage + Remotely Save**. Everything is
+  an Obsidian plugin plus a cloud account — nothing to install on the machine, so
+  it slips past corporate IT restrictions. See **Option A-Supabase** below.
 
 You can mix these: e.g. Syncthing between your laptops, Remotely Save for the phone.
 
@@ -48,8 +52,61 @@ Steps:
 Notes:
 - The whole vault round-trips through the bucket, so per-file size still matters on
   some backends — this is where **Sync Sentinel's splitter** earns its keep (below).
-- Supabase specifically: create a Storage bucket, then use its S3 endpoint and
-  service/access keys in Remotely Save.
+
+---
+
+## Option A-Supabase — Supabase Storage step-by-step (no admin install needed)
+
+This is the same Remotely Save mechanism as Option A, spelled out for
+[Supabase](https://supabase.com) — the path to reach for when you **can't install
+anything** on the computer (locked-down work laptop, no admin rights). Remotely
+Save is just an Obsidian community plugin, and Supabase is a website, so there's
+nothing for IT to block.
+
+Why it works: Supabase Storage exposes an **S3-compatible API**, and Remotely Save
+already speaks S3. So Supabase is "your own S3 bucket" with a free tier and a
+friendly dashboard.
+
+> **Verify the specifics against your own account.** Supabase changes its
+> dashboard and free-tier limits over time. The exact menu path for the S3
+> credentials, whether path-style addressing is required, and the current free
+> Storage cap may differ from what's written here — treat the steps below as a
+> map, not gospel, and confirm as you go.
+
+1. **Make a project.** Sign up at supabase.com, create a new project (pick the
+   region closest to you). Wait for it to finish provisioning.
+2. **Create a bucket.** Left sidebar → **Storage** → **New bucket**. Name it
+   (e.g. `obsidian`), and keep it **Private**. (Your notes should never be a
+   public bucket.)
+3. **Get S3 credentials.** Project **Settings → Storage → S3 Connection**. Note
+   the **Endpoint** (looks like `https://<project-ref>.supabase.co/storage/v1/s3`)
+   and the **Region** shown there. Then generate an **S3 access key** — this gives
+   you an **Access key ID** and a **Secret access key**. Copy both now; the secret
+   is shown only once.
+4. **Configure Remotely Save.** In Obsidian → Community plugins → Browse →
+   install **Remotely Save**. Open its settings, choose the **S3** backend, and
+   fill in: Endpoint, Region, Bucket (`obsidian`), Access key ID, Secret access
+   key. If there's an **S3 URL style / "force path-style"** option, set it to
+   **path-style** (Supabase uses path-style addressing).
+5. **Turn on end-to-end encryption.** Set a Remotely Save encryption password.
+   This matters more here than usual: without it, your notes sit in Supabase as
+   plaintext that Supabase (and anyone with the keys) could read. **Write the
+   password down** — lose it and the remote copy is unrecoverable.
+6. **First sync + repeat.** Run one manual sync, confirm files land in the bucket
+   (Storage view), then enable auto-sync. Do the same on your phone and other
+   machines — **same bucket, same encryption password**.
+
+Watch-outs:
+- **Free-tier limits.** Supabase's free plan caps storage and monthly egress
+  (on the order of ~1 GB storage — check the current number on their pricing
+  page). A media-heavy vault will outgrow it; a text vault is fine for a long
+  time. Sync Sentinel's splitter also keeps any single object under a per-file
+  ceiling, so large attachments don't fail the upload.
+- **Path-style addressing:** if syncing errors out with bucket/endpoint errors,
+  the path-style vs virtual-host setting is the first thing to flip.
+- This is transmission-through-a-server, not peer-to-peer. If you specifically
+  want "nothing sits on a server," that's **Option C (Syncthing)** — but that
+  needs an install, which is exactly what this option avoids.
 
 ---
 
