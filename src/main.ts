@@ -23,6 +23,7 @@ import { BaseStore } from "./merge/baseStore";
 import { ConflictWeaver, isSyncConflictPath } from "./merge/conflictMerge";
 import { HistoryModal } from "./merge/historyModal";
 import { RecoveryService } from "./merge/recovery";
+import { GuideModal } from "./guideModal";
 
 interface PersistedData {
   settings: SyncSentinelSettings;
@@ -301,6 +302,11 @@ export default class SyncSentinelPlugin extends Plugin {
       id: "scan-sync-conflicts",
       name: "Scan for sync conflicts and merge offline edits",
       callback: () => this.weaver.scan(),
+    });
+    this.addCommand({
+      id: "open-sync-guide",
+      name: "Open the free DIY sync guide",
+      callback: () => new GuideModal(this.app).open(),
     });
     this.addCommand({
       id: "file-history",

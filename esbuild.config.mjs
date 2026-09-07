@@ -13,6 +13,9 @@ const ctx = await esbuild.context({
   sourcemap: prod ? false : "inline",
   treeShaking: true,
   minify: prod,
+  // Bundle the free-sync guide markdown as a string so the in-plugin guide
+  // viewer stays a single source of truth with docs/public/diy-sync-guide.md.
+  loader: { ".md": "text" },
   outfile: "main.js",
 });
 

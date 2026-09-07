@@ -209,3 +209,8 @@ it means losing the encrypted data.
 
 Sources and further reading: the plugin repos linked above, the Obsidian community
 forum's self-hosting threads, and independent 2026 write-ups on free Obsidian sync.
+
+---
+
+*Last updated 2026-09-06 · current as of Sync Sentinel v0.13.0. Third-party
+services and their free tiers change — verify specifics against each provider.*

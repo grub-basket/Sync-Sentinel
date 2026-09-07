@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type SyncSentinelPlugin from "./main";
 import { humanBytes } from "./util/fsutil";
 import { FolderSuggest } from "./util/folderSuggest";
+import { GuideModal } from "./guideModal";
 
 const MB = 1024 * 1024;
 
@@ -676,6 +677,15 @@ export class SyncSentinelSettingTab extends PluginSettingTab {
 
   private miscSection(c: HTMLElement): void {
     c.createEl("h2", { text: "Misc" });
+
+    new Setting(c)
+      .setName("Free DIY sync guide")
+      .setDesc(
+        "How to sync your vault desktop↔mobile (incl. iOS) for free — Remotely Save + object storage, Supabase for locked-down machines, Self-hosted LiveSync, Syncthing, and Git. Opens in a window; nothing leaves your vault."
+      )
+      .addButton((b) =>
+        b.setButtonText("Open guide").onClick(() => new GuideModal(this.plugin.app).open())
+      );
 
     new Setting(c)
       .setName("This device's name")
